@@ -1,0 +1,2 @@
+# Python library used by the original serial CAN tools.
+pyserial>=3.5,<4

@@ -1,0 +1,13 @@
+captures/
+__pycache__/
+*.pyc
+*.log
+.env
+
+# Local Python environment and IDE files
+.venv/
+venv/
+.DS_Store
+.idea/
+.vscode/
+*.zip

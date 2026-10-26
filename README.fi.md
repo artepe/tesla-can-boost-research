@@ -8,7 +8,7 @@ Tämä on **keskeneräinen Tesla Model 3 / Model Y CAN-väylän tutkimusprojekti
 **Alkuperäinen tekijä:** Colin McDonough ([ColinM-sys](https://github.com/ColinM-sys))  
 **Tämän tutkimusversion dokumentointi ja paketointi:** [artepe](https://github.com/artepe)
 
-Tämä paketti on alkuperäisen projektin pohjalta dokumentoitu tutkimusversio. Alkuperäisiä Python-tiedostoja ei ole muutettu. Uutta ovat selkeytetty dokumentaatio, tekijätiedot ja riippuvuustiedostot. Alkuperäinen README on tallessa osoitteessa [`docs/UPSTREAM_README.md`](docs/UPSTREAM_README.md).
+Tämä paketti on alkuperäisen projektin pohjalta dokumentoitu tutkimusversio. Alkuperäisiä Python-tiedostoja ei ole muutettu, lukuun ottamatta neljän paikallisen web-palvelimen tietoturvakorjausta (`dashboard_server.py`, `drive_recorder.py`, `ghost3d.py`, `ghost_ui.py`): ne kuuntelevat oletuksena vain omaa konetta, vaativat joka käynnistyksellä vaihtuvan pääsytunnisteen eivätkä enää salli muiden sivustojen pyyntöjä tai mielivaltaisten tiedostojen lukemista (ks. [SECURITY.md](SECURITY.md)). Uutta ovat selkeytetty dokumentaatio, tekijätiedot ja riippuvuustiedostot. Alkuperäinen README on tallessa osoitteessa [`docs/UPSTREAM_README.md`](docs/UPSTREAM_README.md).
 
 ## Sisältö
 

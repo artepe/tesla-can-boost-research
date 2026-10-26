@@ -11,6 +11,8 @@ import json
 import sys
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
+from local_web_guard import GuardedHandlerMixin, add_bind_argument, print_access
+
 DEFAULT_BAUD = 115200
 HTTP_PORT = 9090
 
@@ -328,16 +330,19 @@ class GhostController:
         }
 
 
-class GhostHandler(BaseHTTPRequestHandler):
+class GhostHandler(GuardedHandlerMixin, BaseHTTPRequestHandler):
     controller = None
 
     def do_GET(self):
-        if self.path == "/":
+        if not self.admit():
+            return
+        path = self.path_only()
+        if path == "/":
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.end_headers()
             self.wfile.write(HTML.encode())
-        elif self.path == "/api/status":
+        elif path == "/api/status":
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
@@ -347,24 +352,28 @@ class GhostHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def do_POST(self):
-        if self.path == "/api/mode":
-            length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
-            mode = body.get("mode", "off")
-            self.controller.set_mode(mode)
+        if not self.admit():
+            return
+        path = self.path_only()
+        if path not in ("/api/mode", "/api/honk"):
+            self.send_response(404)
+            self.end_headers()
+            return
+        body = self.read_json()
+        if body is None:
+            return
+        if path == "/api/mode":
+            self.controller.set_mode(body.get("mode", "off"))
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(json.dumps(self.controller.get_status()).encode())
-        elif self.path == "/api/honk":
+        else:
             self.controller.honk()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(b'{"ok":true}')
-        else:
-            self.send_response(404)
-            self.end_headers()
 
     def log_message(self, format, *args):
         pass
@@ -382,6 +391,7 @@ def main():
     parser = argparse.ArgumentParser(description="Ghost3D Tesla UI")
     parser.add_argument("--port", "-p", help="Serial port")
     parser.add_argument("--http", type=int, default=HTTP_PORT)
+    add_bind_argument(parser)
     args = parser.parse_args()
 
     port = args.port or find_port()
@@ -393,9 +403,10 @@ def main():
     controller.connect()
 
     GhostHandler.controller = controller
-    httpd = HTTPServer(("0.0.0.0", args.http), GhostHandler)
-    print(f"\nGhost3D UI running at http://localhost:{args.http}")
-    print("Open this in your browser. No internet needed.\n")
+    httpd = HTTPServer((args.bind, args.http), GhostHandler)
+    print("\nGhost3D UI running.")
+    print_access(args.bind, args.http)
+    print("No internet needed.\n")
 
     try:
         httpd.serve_forever()

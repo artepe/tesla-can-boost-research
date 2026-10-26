@@ -9,8 +9,10 @@ import json
 import threading
 import sys
 import struct
-from http.server import HTTPServer, SimpleHTTPRequestHandler
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
+
+from local_web_guard import GuardedHandlerMixin, add_bind_argument, print_access
 
 DEFAULT_BAUD = 115200
 HTTP_PORT = 8080
@@ -318,18 +320,20 @@ class CANReader:
             }
 
 
-class DashboardHandler(SimpleHTTPRequestHandler):
+class DashboardHandler(GuardedHandlerMixin, BaseHTTPRequestHandler):
     can_reader = None
 
     def do_GET(self):
-        if self.path == "/api/state":
+        if not self.admit():
+            return
+        path = self.path_only()
+        if path == "/api/state":
             state = self.can_reader.get_state() if self.can_reader else {}
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(state).encode())
-        elif self.path == "/" or self.path == "/index.html":
+        elif path == "/" or path == "/index.html":
             dashboard_path = Path(__file__).parent / "dashboard.html"
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
@@ -355,6 +359,7 @@ def main():
     parser = argparse.ArgumentParser(description="Tesla CAN Dashboard Server")
     parser.add_argument("--port", "-p", help="Serial port")
     parser.add_argument("--http", type=int, default=HTTP_PORT, help="HTTP port")
+    add_bind_argument(parser)
     args = parser.parse_args()
 
     port = args.port or find_obdlink_port()
@@ -370,9 +375,8 @@ def main():
     print(f"CAN reader started on {port}")
 
     DashboardHandler.can_reader = reader
-    httpd = HTTPServer(("0.0.0.0", args.http), DashboardHandler)
-    print(f"Dashboard running at http://localhost:{args.http}")
-    print(f"Also accessible at http://100.113.229.71:{args.http}")
+    httpd = HTTPServer((args.bind, args.http), DashboardHandler)
+    print_access(args.bind, args.http)
     print("Press Ctrl+C to stop.\n")
 
     try:

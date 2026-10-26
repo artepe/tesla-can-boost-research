@@ -11,8 +11,10 @@ import threading
 import sys
 import os
 from datetime import datetime
-from http.server import HTTPServer, SimpleHTTPRequestHandler
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
+
+from local_web_guard import GuardedHandlerMixin, add_bind_argument, print_access
 
 DEFAULT_BAUD = 115200
 HTTP_PORT = 8080
@@ -304,24 +306,26 @@ class DriveRecorder:
             }
 
 
-class DashboardHandler(SimpleHTTPRequestHandler):
+class DashboardHandler(GuardedHandlerMixin, BaseHTTPRequestHandler):
     recorder = None
 
     def do_GET(self):
-        if self.path == "/api/state":
+        if not self.admit():
+            return
+        path = self.path_only()
+        if path == "/api/state":
             state = self.recorder.get_state() if self.recorder else {}
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(state).encode())
-        elif self.path == "/" or self.path == "/index.html":
+        elif path == "/" or path == "/index.html":
             dashboard_path = Path(__file__).parent / "dashboard.html"
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.end_headers()
             self.wfile.write(dashboard_path.read_bytes())
-        elif self.path == "/performance" or self.path == "/performance_dash.html":
+        elif path == "/performance" or path == "/performance_dash.html":
             perf_path = Path(__file__).parent / "performance_dash.html"
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
@@ -347,6 +351,7 @@ def main():
     parser = argparse.ArgumentParser(description="Tesla Drive Recorder")
     parser.add_argument("--port", "-p", help="Serial port")
     parser.add_argument("--http", type=int, default=HTTP_PORT, help="HTTP port")
+    add_bind_argument(parser)
     args = parser.parse_args()
 
     port = args.port or find_obdlink_port()
@@ -363,9 +368,8 @@ def main():
 
     # Start HTTP server
     DashboardHandler.recorder = recorder
-    httpd = HTTPServer(("0.0.0.0", args.http), DashboardHandler)
-    print(f"Dashboard: http://localhost:{args.http}")
-    print(f"Remote:    http://100.113.229.71:{args.http}")
+    httpd = HTTPServer((args.bind, args.http), DashboardHandler)
+    print_access(args.bind, args.http)
     print("Recording all CAN data to captures/ folder")
     print("Drive around! Data is saved even without WiFi.\n")
 

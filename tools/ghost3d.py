@@ -18,6 +18,11 @@ from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
+from local_web_guard import GuardedHandlerMixin, add_bind_argument, print_access
+
+# Only these files are served; arbitrary paths would expose the whole disk.
+STATIC_PAGES = {"performance_dash.html", "dashboard.html"}
+
 DEFAULT_BAUD = 115200
 HTTP_PORT = 9090
 
@@ -422,27 +427,23 @@ class Ghost3D:
             }
 
 
-class Handler(BaseHTTPRequestHandler):
+class Handler(GuardedHandlerMixin, BaseHTTPRequestHandler):
     controller = None
 
     def do_GET(self):
-        if self.path == "/api/state":
+        if not self.admit():
+            return
+        path = self.path_only()
+        if path == "/api/state":
             state = self.controller.get_state()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(state).encode())
-        elif self.path == "/" or self.path == "/index.html":
+        elif path == "/" or path == "/index.html":
             self._serve_file("performance_dash.html")
-        elif self.path.startswith("/"):
-            fname = self.path.lstrip("/")
-            fpath = Path(__file__).parent / fname
-            if fpath.exists():
-                self._serve_file(fname)
-            else:
-                self.send_response(404)
-                self.end_headers()
+        elif path.lstrip("/") in STATIC_PAGES:
+            self._serve_file(path.lstrip("/"))
         else:
             self.send_response(404)
             self.end_headers()
@@ -455,33 +456,31 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(fpath.read_bytes())
 
     def do_POST(self):
-        if self.path == "/api/mode":
-            length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
-            mode = body.get("mode", "off")
-            self.controller.set_ghost(mode)
-            self._json_response(self.controller.get_state())
-        elif self.path == "/api/honk":
-            self.controller.honk()
-            self._json_response({"ok": True})
-        elif self.path == "/api/drift":
-            length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
-            self.controller.set_drift(body.get("enabled", False))
-            self._json_response(self.controller.get_state())
-        elif self.path == "/api/colin":
-            length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
-            self.controller.set_colin(body.get("enabled", False))
-            self._json_response(self.controller.get_state())
-        elif self.path == "/api/tc":
-            length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
-            self.controller.set_tc(body.get("mode", "normal"))
-            self._json_response(self.controller.get_state())
-        else:
+        if not self.admit():
+            return
+        path = self.path_only()
+        if path not in ("/api/mode", "/api/honk", "/api/drift", "/api/colin", "/api/tc"):
             self.send_response(404)
             self.end_headers()
+            return
+        body = self.read_json()
+        if body is None:
+            return
+        if path == "/api/mode":
+            self.controller.set_ghost(body.get("mode", "off"))
+            self._json_response(self.controller.get_state())
+        elif path == "/api/honk":
+            self.controller.honk()
+            self._json_response({"ok": True})
+        elif path == "/api/drift":
+            self.controller.set_drift(body.get("enabled") is True)
+            self._json_response(self.controller.get_state())
+        elif path == "/api/colin":
+            self.controller.set_colin(body.get("enabled") is True)
+            self._json_response(self.controller.get_state())
+        elif path == "/api/tc":
+            self.controller.set_tc(body.get("mode", "normal"))
+            self._json_response(self.controller.get_state())
 
     def _json_response(self, data):
         self.send_response(200)
@@ -505,6 +504,7 @@ def main():
     parser = argparse.ArgumentParser(description="Ghost3D")
     parser.add_argument("--port", "-p", help="Serial port")
     parser.add_argument("--http", type=int, default=HTTP_PORT)
+    add_bind_argument(parser)
     args = parser.parse_args()
 
     port = args.port or find_port()
@@ -518,10 +518,10 @@ def main():
     threading.Thread(target=g.run_loop, daemon=True).start()
 
     Handler.controller = g
-    httpd = HTTPServer(("0.0.0.0", args.http), Handler)
+    httpd = HTTPServer((args.bind, args.http), Handler)
     print(f"\n{'='*50}")
     print(f"  GHOST3D Tesla Performance Controller")
-    print(f"  http://localhost:{args.http}")
+    print_access(args.bind, args.http)
     print(f"{'='*50}\n")
 
     try:

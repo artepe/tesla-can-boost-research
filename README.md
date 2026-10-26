@@ -19,7 +19,7 @@ Read this page in [Finnish / Suomeksi](README.fi.md).
 - A community-maintained Tesla DBC signal file (`dbc/Model3CAN.dbc`).
 - **Unverified, high-risk CAN transmission experiments inherited from upstream.** These files remain for source inspection and research context, *not* as ready-to-use driving features.
 
-The original Python source files are unchanged from the supplied upstream archive. This packaging adds or revises documentation, credits and dependency manifests. The original upstream README is archived at [`docs/UPSTREAM_README.md`](docs/UPSTREAM_README.md); its claims should **not** be treated as independent verification.
+The original Python source files are unchanged from the supplied upstream archive, except for a security fix to the four local web servers (`dashboard_server.py`, `drive_recorder.py`, `ghost3d.py`, `ghost_ui.py`): they now listen on this computer only by default, require a per-run access token and no longer allow cross-site requests or arbitrary file reads (see [SECURITY.md](SECURITY.md)). This packaging adds or revises documentation, credits and dependency manifests. The original upstream README is archived at [`docs/UPSTREAM_README.md`](docs/UPSTREAM_README.md); its claims should **not** be treated as independent verification.
 
 ## What is NOT established
 

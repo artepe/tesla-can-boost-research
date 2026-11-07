@@ -58,7 +58,8 @@ For an example offline capture format, see the original research code and `tools
 │   ├── Model3CAN.dbc             # Third-party community CAN database
 │   └── LICENSE                   # MIT notice for the DBC source
 ├── docs/UPSTREAM_README.md        # Original, unverified upstream notes
-└── tools/                       # Research and experiment scripts
+├── tools/                       # Research and experiment scripts
+└── wall-connector/              # Wall Connector Gen 3 load management (ESPHome), separate from the CAN tools
 ```
 
 ## Roadmap and contributions

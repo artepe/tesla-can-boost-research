@@ -1,0 +1,61 @@
+# =============================================================================
+# Tesla BLE – KOLMAS KORTTI (ESP32-S3), lataus suoraan autosta Bluetoothilla
+# ESP32 paritetaan auton avaimeksi. HA:sta saa: latausvirta (A), lataus
+# päälle/pois, latausraja (%), SoC ja latausteho. Ei pilveä eikä Fleet API:a.
+#
+# Projekti: https://github.com/yoziru/esphome-tesla-ble (versio pinnattu alla)
+# Vaatii ESPHome 2026.9.0 tai uudemman.
+#
+# MIKSI ERI KORTTI KUIN LATURISOLMU: Bluetooth-salaus kuormittaa ESP:tä, ja
+# laturisolmun Modbus-vastauksen on lähdettävä alle 66 ms:ssa.
+# Kortti: S3 (projektin testattu AtomS3 on S3). C3 ei ole projektin testaama.
+#
+# SIJOITUS: autotalliin, korkeintaan muutaman metrin päähän autosta.
+#
+# KÄYTTÖÖNOTTO
+# 1. Auton BLE-MAC: Android + nRF Connect, etsi nimi muotoa S…C (18 merkkiä).
+#    iPhone ei näytä MAC-osoitteita.
+# 2. Täytä secrets-lisays.yaml:n Tesla-rivit (MAC ja VIN).
+# 3. Flashaa, lisää HA:han (ESPHome-integraatio).
+# 4. Istu autoon -> HA: laitteen "Pair BLE key" -> napauta avainkortti
+#    keskikonsoliin heti -> hyväksy auton näytöltä.
+# 5. Tarkista autosta: Hallintalaitteet -> Lukot -> uusi avain.
+# =============================================================================
+
+substitutions:
+  name: tesla-ble
+  friendly_name: Tesla BLE
+  tesla_ble_ref: v2026.10.4
+  # Yleinen ESP32-S3-kehityskortti.
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  flash_size: 4MB
+  ble_mac_address: !secret tesla_ble_mac_address
+  tesla_vin: !secret tesla_vin
+
+packages:
+  yoziru.esphome-tesla-ble:
+    url: https://github.com/yoziru/esphome-tesla-ble.git
+    ref: ${tesla_ble_ref}
+    files: [packages/dashboard.yml]
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+api:
+  encryption:
+    key: !secret tesla_ble_api_key
+
+wifi:
+  ssid: !secret loadpilot_wifi_ssid
+  password: !secret loadpilot_wifi_password
+  ap:
+    password: !secret loadpilot_ap_password
+
+tesla_ble_vehicle:
+  # Vain lataus: avain ei voi avata lukkoja eikä käynnistää autoa.
+  # Rooli asetetaan parituksessa; muutos vaatii uuden parituksen.
+  role: CHARGING_MANAGER
+  # Kolmivaiheinen Wall Connector: 16 A × 3 = 11 kW.
+  charging_amps_max: 16

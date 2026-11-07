@@ -16,6 +16,7 @@ Tämä paketti on alkuperäisen projektin pohjalta dokumentoitu tutkimusversio. 
 - Selaimella katseltavia koenäyttöjä sekä mittausdatan käsittelyä.
 - Model 3 -auton yhteisöpohjainen DBC-signaalitietokanta.
 - Alkuperäisestä projektista perittyjä **kokeellisia ja riskialttiita CAN-kirjoitusskriptejä**, joita **ei ole vahvistettu turvallisiksi eikä toimiviksi**.
+- `wall-connector/`: Wall Connector Gen 3 -laturin kuormanhallinta ESPHomella. Erillään CAN-työkaluista, ei lähetä mitään auton CAN-väylään.
 
 ## Mitä ei ole vielä todistettu?
 

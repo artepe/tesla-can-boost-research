@@ -1,0 +1,897 @@
+<!doctype html>
+<html lang="fi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0}img{max-width:100%}[hidden]{display:none!important}
+</style>
+<title>Tesla-latauksen kuormanhallinta</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: ohjauspaneeli – tilarivi ylhäällä, vaihepalkit ja ohjaimet rinnakkain leveällä näytöllä (pinossa puhelimella), aikasarjat ja tekninen näkymä alla */
+:root {
+  --bg: #eceeea;
+  --surface: #fcfcfb;
+  --surface-2: #f1f2ef;
+  --ink: #111415;
+  --ink-2: #4a5053;
+  --muted: #7d8385;
+  --hair: #dfe1dc;
+  --axis: #c3c6c0;
+  --ev: #2c3134;
+  --ev-fill: rgba(44, 49, 52, 0.10);
+  --l1: #2a78d6;
+  --l2: #eb6834;
+  --l3: #1baf7a;
+  --good: #0ca30c;
+  --warn: #fab219;
+  --crit: #d03b3b;
+  --on-ink: #fcfcfb;
+  --f-display: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+  --f-body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1110;
+    --surface: #1a1a19;
+    --surface-2: #232422;
+    --ink: #f0efec;
+    --ink-2: #c3c2b7;
+    --muted: #8f8d86;
+    --hair: #2c2c2a;
+    --axis: #3a3a37;
+    --ev: #e2e0d8;
+    --ev-fill: rgba(226, 224, 216, 0.10);
+    --l1: #3987e5;
+    --l2: #d95926;
+    --l3: #199e70;
+    --on-ink: #1a1a19;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1110;
+  --surface: #1a1a19;
+  --surface-2: #232422;
+  --ink: #f0efec;
+  --ink-2: #c3c2b7;
+  --muted: #8f8d86;
+  --hair: #2c2c2a;
+  --axis: #3a3a37;
+  --ev: #e2e0d8;
+  --ev-fill: rgba(226, 224, 216, 0.10);
+  --l1: #3987e5;
+  --l2: #d95926;
+  --l3: #199e70;
+  --on-ink: #1a1a19;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--f-body);
+  font-size: 15px;
+  line-height: 1.45;
+}
+.wrap {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 40px;
+  display: grid;
+  gap: 14px;
+}
+
+/* --- Otsikko ------------------------------------------------------------ */
+.top { display: grid; gap: 6px; }
+.eyebrow {
+  margin: 0;
+  font-family: var(--f-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+h1 {
+  margin: 0;
+  font-family: var(--f-display);
+  font-weight: 600;
+  font-size: clamp(28px, 5.4vw, 40px);
+  line-height: 1.05;
+  letter-spacing: 0.005em;
+  text-wrap: balance;
+}
+.lede { margin: 2px 0 0; max-width: 64ch; color: var(--ink-2); }
+
+/* --- Tilarivi ----------------------------------------------------------- */
+.status {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  align-items: end;
+  padding-block: 4px;
+}
+@media (min-width: 720px) { .status { grid-template-columns: auto 1fr auto; gap: 28px; } }
+.kpi { display: grid; gap: 0; }
+.label {
+  font-family: var(--f-mono);
+  font-size: 11px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.kpi-value {
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: 56px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.kpi-value small { font-size: 24px; font-weight: 600; color: var(--ink-2); }
+.kpi-sub { font-family: var(--f-mono); font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.state {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px 7px 10px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--hair);
+  font-weight: 600;
+  font-size: 14.5px;
+}
+.state .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+.state[data-k="good"] .dot { background: var(--good); }
+.state[data-k="warn"] .dot { background: var(--warn); }
+.state[data-k="crit"] { background: var(--crit); border-color: var(--crit); color: #ffffff; }
+.state[data-k="crit"] .dot { background: #ffffff; }
+.worst { display: grid; gap: 2px; }
+@media (min-width: 720px) { .worst { justify-items: end; text-align: right; } }
+.worst-val { font-family: var(--f-mono); font-size: 15px; font-variant-numeric: tabular-nums; }
+
+/* --- Kortit ------------------------------------------------------------- */
+.grid { display: grid; gap: 14px; }
+@media (min-width: 900px) { .grid { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); align-items: start; } }
+.card {
+  background: var(--surface);
+  border: 1px solid var(--hair);
+  border-radius: 10px;
+  padding: 16px;
+  min-width: 0;
+}
+.card-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; margin-bottom: 12px; }
+h2 {
+  margin: 0;
+  font-family: var(--f-display);
+  font-weight: 600;
+  font-size: 21px;
+  letter-spacing: 0.01em;
+}
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; flex: none; }
+.sw-line { width: 16px; height: 0; border-top: 2px solid; border-radius: 0; }
+.sw-dash { width: 16px; height: 0; border-top: 2px dashed var(--ink-2); border-radius: 0; }
+
+/* --- Vaihepalkit -------------------------------------------------------- */
+.phase-rows { display: grid; gap: 16px; }
+.prow { display: grid; grid-template-columns: 26px minmax(0, 1fr) 104px; gap: 10px; align-items: center; }
+.pname { font-family: var(--f-display); font-weight: 700; font-size: 20px; }
+.track { position: relative; height: 24px; background: var(--surface-2); border-radius: 5px; }
+.seg { position: absolute; top: 0; bottom: 0; transition: left 0.2s linear, width 0.2s linear; }
+.seg-house { left: 0; border-radius: 4px 0 0 4px; }
+.seg-ev { background: var(--ev); border-left: 2px solid var(--surface-2); border-radius: 0 4px 4px 0; }
+.mark { position: absolute; top: -5px; bottom: -5px; width: 0; }
+.mark-budget { border-left: 2px dashed var(--ink-2); }
+.mark-fuse { border-left: 2px solid var(--crit); }
+.pval { display: grid; justify-items: end; text-align: right; }
+.ptotal { font-family: var(--f-mono); font-weight: 500; font-size: 16px; font-variant-numeric: tabular-nums; }
+.psub { font-family: var(--f-mono); font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.psub.over { color: var(--crit); font-weight: 500; }
+.scale { display: grid; grid-template-columns: 26px minmax(0, 1fr) 104px; gap: 10px; margin-top: 6px; }
+.scale-axis { position: relative; height: 16px; font-family: var(--f-mono); font-size: 10.5px; color: var(--muted); }
+.scale-axis span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+.note { margin: 12px 0 0; font-size: 12.5px; color: var(--muted); }
+
+/* --- Ohjaimet ----------------------------------------------------------- */
+.controls { display: grid; gap: 14px; }
+.sub-h { margin: 0; font-family: var(--f-mono); font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
+.presets { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn {
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--axis);
+  border-radius: 7px;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+.btn:hover { background: var(--surface-2); }
+.chips { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.chip {
+  font: inherit;
+  text-align: left;
+  display: grid;
+  gap: 1px;
+  padding: 9px 11px;
+  border-radius: 8px;
+  border: 1px solid var(--hair);
+  background: var(--surface-2);
+  color: var(--ink);
+  cursor: pointer;
+  min-width: 0;
+}
+.chip b { font-weight: 600; font-size: 14.5px; }
+.chip small { font-family: var(--f-mono); font-size: 11px; color: var(--muted); }
+.chip[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--on-ink); }
+.chip[aria-pressed="true"] small { color: var(--on-ink); opacity: 0.75; }
+.field { display: grid; gap: 6px; }
+.field-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.field-top label, .field-top .lbl { font-weight: 600; font-size: 14.5px; }
+.field-top output { font-family: var(--f-mono); font-size: 13.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.hint { font-size: 12.5px; color: var(--muted); margin: 0; }
+input[type="range"] { width: 100%; accent-color: var(--ink); margin: 0; height: 24px; }
+.row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.row .lbl { font-weight: 600; font-size: 14.5px; }
+.divider { height: 1px; background: var(--hair); margin-block: 2px; }
+
+.switch {
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: 0;
+  padding: 2px 0;
+  color: var(--ink-2);
+  cursor: pointer;
+  font-family: var(--f-mono);
+  font-size: 12.5px;
+}
+.switch .trk { width: 42px; height: 24px; border-radius: 12px; background: var(--axis); position: relative; transition: background 0.15s; flex: none; }
+.switch .knob { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--surface); transition: left 0.15s; }
+.switch[aria-checked="true"] .trk { background: var(--ink); }
+.switch[aria-checked="true"] .knob { left: 21px; background: var(--on-ink); }
+
+.seg-ctl { display: inline-flex; border: 1px solid var(--axis); border-radius: 7px; overflow: hidden; }
+.seg-ctl button {
+  font: inherit;
+  font-family: var(--f-mono);
+  font-size: 13px;
+  padding: 6px 11px;
+  border: 0;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+.seg-ctl button + button { border-left: 1px solid var(--axis); }
+.seg-ctl button[aria-checked="true"] { background: var(--ink); color: var(--on-ink); }
+
+/* --- Kaaviot ------------------------------------------------------------ */
+.chart { position: relative; height: 220px; touch-action: pan-y; }
+.chart.small { height: 160px; }
+.chart svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.chart text { font-family: var(--f-mono); font-size: 10.5px; fill: var(--muted); }
+.chart text.end { font-size: 11px; font-weight: 500; fill: var(--ink-2); }
+.chart text.lab { paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
+.tip {
+  position: absolute;
+  top: 6px;
+  pointer-events: none;
+  background: var(--surface);
+  border: 1px solid var(--axis);
+  border-radius: 7px;
+  padding: 7px 9px;
+  font-family: var(--f-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink);
+  min-width: 128px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.10);
+  font-variant-numeric: tabular-nums;
+}
+.tip .t { color: var(--muted); margin-bottom: 2px; }
+.tip .r { display: flex; align-items: center; gap: 6px; justify-content: space-between; }
+.tip .r span:first-child { display: inline-flex; align-items: center; gap: 6px; }
+
+/* --- Tekninen näkymä ---------------------------------------------------- */
+details.tech summary {
+  cursor: pointer;
+  font-family: var(--f-display);
+  font-weight: 600;
+  font-size: 21px;
+  list-style: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+details.tech summary::-webkit-details-marker { display: none; }
+details.tech summary::after { content: "+"; font-family: var(--f-mono); font-size: 18px; color: var(--muted); }
+details.tech[open] summary::after { content: "−"; }
+.tech-body { display: grid; gap: 14px; margin-top: 12px; }
+@media (min-width: 760px) { .tech-body { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+.readout { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.ro { background: var(--surface-2); border-radius: 8px; padding: 10px; display: grid; gap: 2px; }
+.ro-v { font-family: var(--f-mono); font-size: 18px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.pubbar { position: relative; height: 10px; background: var(--surface-2); border-radius: 5px; margin-top: 10px; }
+.pubbar .fill { position: absolute; top: 0; bottom: 0; left: 0; background: var(--ink-2); border-radius: 5px; transition: width 0.2s linear; }
+.pubbar .lmark { position: absolute; top: -5px; bottom: -5px; border-left: 2px solid var(--crit); }
+.formula {
+  font-family: var(--f-mono);
+  font-size: 12.5px;
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  white-space: pre;
+  margin: 0;
+  color: var(--ink);
+}
+.tech p { margin: 0; color: var(--ink-2); max-width: 64ch; }
+.tech-state { font-weight: 600; color: var(--ink); }
+
+footer { font-size: 12.5px; color: var(--muted); max-width: 72ch; }
+footer a { color: var(--ink-2); }
+
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 6px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <p class="eyebrow">Simulaatio · esimerkkiarvot, ei mittausdataa</p>
+    <h1>Tesla-latauksen kuormanhallinta</h1>
+    <p class="lede">Laturi seuraa kuormitetuinta vaihetta ja pitää sen säätörajan alla. Kytke kuormia päälle, ja katso miten latausvirta reagoi. Kokeile myös, mitä tapahtuu ilman kuormanhallintaa.</p>
+  </header>
+
+  <section class="status" aria-label="Lataustila">
+    <div class="kpi">
+      <span class="label">Teslan latausteho</span>
+      <span class="kpi-value"><span id="kw">0,0</span> <small>kW</small></span>
+      <span class="kpi-sub" id="amps">0,0 A × 3 vaihetta</span>
+    </div>
+    <div class="state" id="state" data-k="good" role="status" aria-live="polite"><span class="dot" aria-hidden="true"></span><span id="stateText">Lataa</span><span id="stateTimer" aria-hidden="true"></span></div>
+    <div class="worst">
+      <span class="label" id="worstLabel">Kuormitetuin vaihe / säätöraja</span>
+      <span class="worst-val" id="worst">L1 · 0,0 / 22,5 A</span>
+    </div>
+  </section>
+
+  <div class="grid">
+    <section class="card" aria-labelledby="ph-h">
+      <div class="card-head">
+        <h2 id="ph-h">Vaiheet nyt</h2>
+        <div class="legend">
+          <span><i class="sw" style="background:var(--l1)"></i><i class="sw" style="background:var(--l2);margin-left:-3px"></i><i class="sw" style="background:var(--l3);margin-left:-3px"></i>Talon kuorma</span>
+          <span><i class="sw" style="background:var(--ev)"></i>Tesla</span>
+        </div>
+      </div>
+      <div class="phase-rows" id="phaseRows"></div>
+      <div class="scale" aria-hidden="true"><span></span><div class="scale-axis" id="scaleAxis"></div><span></span></div>
+      <p class="note">Katkoviiva on säätöraja (90 % pääsulakkeesta), punainen viiva pääsulake. Tesla ottaa saman virran jokaiselta vaiheelta, joten kuormitetuin vaihe määrää latausvirran.</p>
+    </section>
+
+    <section class="card controls" aria-labelledby="ctl-h">
+      <h2 id="ctl-h">Kuormat</h2>
+      <div class="presets" id="presets"></div>
+      <div class="chips" id="chips"></div>
+      <div class="field">
+        <div class="field-top"><label for="vilp">VILP, L3 (yksivaiheinen)</label><output id="vilpOut" for="vilp">8,0 A</output></div>
+        <input type="range" id="vilp" min="0" max="16" step="0.5" value="8">
+      </div>
+
+      <div class="divider"></div>
+      <p class="sub-h">Lataus ja järjestelmä</p>
+
+      <div class="row">
+        <span class="lbl" id="plugLbl">Tesla kytketty</span>
+        <button class="switch" id="plug" role="switch" aria-checked="true" aria-labelledby="plugLbl"><span class="trk"><span class="knob"></span></span><span class="sv">Kyllä</span></button>
+      </div>
+      <div class="field">
+        <div class="field-top"><label for="cap">Latauskatto</label><output id="capOut" for="cap">16 A · 11,0 kW</output></div>
+        <input type="range" id="cap" min="6" max="16" step="1" value="16">
+        <p class="hint">Pörssisähkö: halpa tunti 16 A, kallis tunti pienempi.</p>
+      </div>
+      <div class="row">
+        <span class="lbl" id="mgmtLbl">Kuormanhallinta</span>
+        <button class="switch" id="mgmt" role="switch" aria-checked="true" aria-labelledby="mgmtLbl"><span class="trk"><span class="knob"></span></span><span class="sv">Päällä</span></button>
+      </div>
+      <div class="row">
+        <span class="lbl" id="fuseLbl">Pääsulake</span>
+        <div class="seg-ctl" role="radiogroup" aria-labelledby="fuseLbl" id="fuse">
+          <button role="radio" aria-checked="true" data-v="25">3×25 A</button><button role="radio" aria-checked="false" data-v="35">3×35 A</button>
+        </div>
+      </div>
+      <div class="row">
+        <span class="lbl" id="speedLbl">Simulaation nopeus</span>
+        <div class="seg-ctl" role="radiogroup" aria-labelledby="speedLbl" id="speed">
+          <button role="radio" aria-checked="false" data-v="1">1×</button><button role="radio" aria-checked="true" data-v="5">5×</button><button role="radio" aria-checked="false" data-v="20">20×</button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <section class="card" aria-labelledby="pc-h">
+    <div class="card-head">
+      <h2 id="pc-h">Vaihevirrat pääsulakkeella</h2>
+      <div class="legend">
+        <span><i class="sw sw-line" style="border-color:var(--l1)"></i>L1</span>
+        <span><i class="sw sw-line" style="border-color:var(--l2)"></i>L2</span>
+        <span><i class="sw sw-line" style="border-color:var(--l3)"></i>L3</span>
+        <span><i class="sw sw-dash"></i>Säätöraja</span>
+        <span><i class="sw sw-line" style="border-color:var(--crit)"></i>Pääsulake</span>
+      </div>
+    </div>
+    <div class="chart" id="phaseChart" role="img" aria-label="Vaihevirrat viimeiseltä kolmelta minuutilta"></div>
+  </section>
+
+  <section class="card" aria-labelledby="ev-h">
+    <div class="card-head">
+      <h2 id="ev-h">Latausvirta</h2>
+      <div class="legend">
+        <span><i class="sw sw-line" style="border-color:var(--ev)"></i>Latausvirta</span>
+        <span><i class="sw sw-dash"></i>Sallittu</span>
+      </div>
+    </div>
+    <div class="chart small" id="evChart" role="img" aria-label="Teslan latausvirta viimeiseltä kolmelta minuutilta"></div>
+  </section>
+
+  <details class="card tech" id="tech">
+    <summary>Mitä laturi näkee</summary>
+    <div class="tech-body">
+      <div>
+        <div class="readout">
+          <div class="ro"><span class="label">Kuormitetuin vaihe</span><span class="ro-v" id="tWorst">0,0 A</span></div>
+          <div class="ro"><span class="label">Julkaistu laturille</span><span class="ro-v" id="tPub">0,00 A</span></div>
+          <div class="ro"><span class="label">Max Conductor Limit</span><span class="ro-v">21 A</span></div>
+        </div>
+        <div class="pubbar" aria-hidden="true"><div class="fill" id="pubFill"></div><div class="lmark" id="pubL"></div></div>
+        <p style="margin-top:10px" class="tech-state" id="tState">–</p>
+      </div>
+      <div style="display:grid;gap:10px">
+        <p>ESP32 esittää laturille Neurio-mittaria. Se ei julkaise oikeaa virtaa vaan siirretyn arvon, jossa laturin oma 21 A:n raja vastaa talon säätörajaa.</p>
+        <pre class="formula">julkaistu = pahin vaihe + (21 A − säätöraja)
+yli 21 A: 21 + 0,5 × ylitys  (0,1…0,9 A)
++ jatkuva ±0,05 A värinä</pre>
+        <p>Alle 21 A laturi saa nostaa (noin 1 A / 30 s), tasan 21 A:ssa se pitää virran ja yli 21 A:n se laskee (noin 1 A/s, täysi pysäytys noin 3 sekunnissa). Värinä estää laturia pitämästä mittaria jumiutuneena.</p>
+      </div>
+    </div>
+  </details>
+
+  <footer>Malli perustuu Tesla LoadPilot -projektin mitattuun käyttäytymiseen (Wall Connector Gen 3, firmware 26.18 ja 26.26.1). Kuormat ja virrat ovat esimerkkejä, eivät talosi mittauksia. <a href="https://github.com/zany92/tesla-loadpilot" target="_blank" rel="noopener">github.com/zany92/tesla-loadpilot</a></footer>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  // ---- Malli ---------------------------------------------------------------
+  const LOADS = [
+    { id: "kiuas", name: "Kiuas", detail: "9 kW · 3×13 A", ph: [13, 13, 13] },
+    { id: "liesi", name: "Liesi ja uuni", detail: "L1 10 A · L2 7 A", ph: [10, 7, 0] },
+    { id: "pesukone", name: "Pesukone", detail: "L2 9 A", ph: [0, 9, 0] },
+    { id: "kuivausrumpu", name: "Kuivausrumpu", detail: "L1 10 A", ph: [10, 0, 0] },
+    { id: "ilp", name: "Ilmalämpöpumppu", detail: "L1 4 A", ph: [4, 0, 0] },
+    { id: "lvv", name: "Lattialämmitys", detail: "L2 6 A", ph: [0, 6, 0] }
+  ];
+  const PRESETS = [
+    { name: "Arki-ilta", loads: ["liesi"], vilp: 8 },
+    { name: "Saunailta", loads: ["kiuas"], vilp: 8 },
+    { name: "Yölataus", loads: [], vilp: 5 }
+  ];
+  const BASE = [1.6, 1.2, 0.9];
+  const L_COND = 21, EV_MAX = 16, EV_MIN = 6, WINDOW = 180;
+  const PH = ["L1", "L2", "L3"];
+  const PHC = ["--l1", "--l2", "--l3"];
+
+  const S = {
+    fuse: 25, mgmt: true, speed: 5, cap: 16, plugged: true, vilp: 8,
+    on: new Set(["liesi"]),
+    I: 0, target: 0, paused: false, resumeT: 0, recovering: false,
+    overT: 0, t: 0, hist: [], house: [0, 0, 0], dither: 0.05
+  };
+
+  const fmt = (v, d = 1) => (Math.round(v * 10 ** d) / 10 ** d).toFixed(d).replace(".", ",").replace("-", "−");
+  const budget = () => S.fuse * 0.9;
+  const maxEV = () => (S.plugged ? Math.min(EV_MAX, S.cap) : 0);
+
+  function houseAt(t) {
+    const h = [0, 0, 0];
+    for (let i = 0; i < 3; i++) {
+      h[i] = BASE[i] + 0.22 * Math.sin(t / 9 + i * 2.1) + 0.12 * Math.sin(t / 2.7 + i * 1.3);
+    }
+    for (const L of LOADS) if (S.on.has(L.id)) for (let i = 0; i < 3; i++) h[i] += L.ph[i];
+    if (S.vilp > 0) h[2] += S.vilp + 0.3 * Math.sin(t / 13);
+    return h.map(v => Math.max(0, v));
+  }
+
+  function step(dt) {
+    const prevT = S.t;
+    S.t += dt;
+    const h = houseAt(S.t);
+    S.house = h;
+    const worstHouse = Math.max(...h);
+    const top = maxEV();
+    S.target = S.mgmt ? Math.max(0, Math.min(top, budget() - worstHouse)) : top;
+
+    if (!S.plugged) {
+      S.I = 0; S.paused = false; S.recovering = false; S.resumeT = 0;
+    } else if (!S.mgmt) {
+      // Ilman kuormanhallintaa auto ottaa latauskaton mukaisen virran.
+      S.I += Math.sign(top - S.I) * Math.min(Math.abs(top - S.I), 2 * dt);
+      S.paused = false;
+    } else if (S.paused) {
+      if (S.target >= EV_MIN + 0.5) {
+        S.resumeT += dt;
+        if (S.resumeT >= 20) { S.paused = false; S.I = EV_MIN; S.recovering = true; S.resumeT = 0; }
+      } else {
+        S.resumeT = 0;
+      }
+      if (S.paused) S.I = 0;
+    } else if (S.target < EV_MIN) {
+      // Minimivirta ei mahdu: laturi ajaa alas ja pysäyttää.
+      S.I = Math.max(0, S.I - 3 * dt);
+      if (S.I <= EV_MIN) { S.paused = true; S.I = 0; S.resumeT = 0; }
+    } else if (S.I > S.target) {
+      const over = worstHouse + S.I - budget();
+      S.I = Math.max(S.target, S.I - (over > 1 ? 3 : 1) * dt);
+      S.recovering = true;
+    } else if (S.I < S.target) {
+      S.I = Math.min(S.target, S.I + (S.recovering ? 1 / 30 : 1) * dt);
+      if (S.I >= top - 0.01) S.recovering = false;
+    }
+
+    const worstT = Math.max(...h.map(v => v + S.I));
+    S.overT = worstT > S.fuse ? S.overT + dt : 0;
+
+    if (Math.floor(S.t) > Math.floor(prevT)) {
+      S.dither = -S.dither;
+      S.hist.push({ t: S.t, p: h.map(v => v + S.I), ev: S.I, tg: S.target, fuse: S.fuse, bud: budget() });
+      while (S.hist.length && S.hist[0].t < S.t - WINDOW - 1) S.hist.shift();
+    }
+  }
+
+  function published() {
+    if (!S.mgmt) return 0;
+    const worstT = Math.max(...S.house.map(v => v + S.I));
+    const oRaw = worstT + (L_COND - budget());
+    let pub = oRaw <= L_COND ? oRaw : L_COND + Math.min(0.9, Math.max(0.1, 0.5 * (oRaw - L_COND)));
+    return Math.max(0, pub + S.dither);
+  }
+
+  function stateOf() {
+    const worstT = Math.max(...S.house.map(v => v + S.I));
+    if (worstT > S.fuse + 0.05) {
+      const m = Math.floor(S.overT / 60), s = Math.floor(S.overT % 60);
+      return { k: "crit", t: "Pääsulake ylikuormassa", timer: ` · ${m}:${String(s).padStart(2, "0")}` };
+    }
+    if (!S.plugged) return { k: "idle", t: "Autoa ei ole kytketty" };
+    if (S.mgmt && S.paused) return { k: "idle", t: "Tauko · odottaa tilaa vaiheella" };
+    const top = maxEV();
+    if (S.mgmt && S.I > S.target + 0.05) return { k: "warn", t: "Laskee · vaihe ylittää säätörajan" };
+    if (S.mgmt && S.target < top - 0.3) return { k: "warn", t: "Rajoittaa vaihekuorman mukaan" };
+    if (S.I < top - 0.3) return { k: "good", t: S.recovering ? "Palautuu · noin 1 A / 30 s" : "Nostaa latausvirtaa" };
+    return { k: "good", t: top < EV_MAX ? "Lataa latauskaton mukaan" : "Lataa täydellä teholla" };
+  }
+
+  // ---- Käyttöliittymä ------------------------------------------------------
+  const $ = id => document.getElementById(id);
+  const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+  // Vaihepalkit
+  const rowsEl = $("phaseRows");
+  const rows = PH.map((name, i) => {
+    const r = document.createElement("div");
+    r.className = "prow";
+    r.innerHTML =
+      `<span class="pname">${name}</span>` +
+      `<div class="track"><div class="seg seg-house" style="background:var(${PHC[i]})"></div><div class="seg seg-ev"></div>` +
+      `<div class="mark mark-budget"></div><div class="mark mark-fuse"></div></div>` +
+      `<div class="pval"><span class="ptotal">0,0 A</span><span class="psub">talo 0,0 · Tesla 0,0</span></div>`;
+    rowsEl.appendChild(r);
+    return {
+      house: r.querySelector(".seg-house"), ev: r.querySelector(".seg-ev"),
+      budget: r.querySelector(".mark-budget"), fuse: r.querySelector(".mark-fuse"),
+      total: r.querySelector(".ptotal"), sub: r.querySelector(".psub")
+    };
+  });
+
+  function drawScale() {
+    const max = S.fuse + 5, el = $("scaleAxis");
+    let html = "";
+    for (let v = 0; v <= max; v += 10) html += `<span style="left:${(v / max) * 100}%">${v} A</span>`;
+    el.innerHTML = html;
+  }
+
+  // Kuormanapit
+  const chipsEl = $("chips");
+  for (const L of LOADS) {
+    const b = document.createElement("button");
+    b.className = "chip"; b.id = "chip-" + L.id; b.type = "button";
+    b.setAttribute("aria-pressed", S.on.has(L.id) ? "true" : "false");
+    b.innerHTML = `<b>${L.name}</b><small>${L.detail}</small>`;
+    b.addEventListener("click", () => {
+      S.on.has(L.id) ? S.on.delete(L.id) : S.on.add(L.id);
+      syncControls();
+    });
+    chipsEl.appendChild(b);
+  }
+  const presetsEl = $("presets");
+  PRESETS.forEach((p, k) => {
+    const b = document.createElement("button");
+    b.className = "btn"; b.type = "button"; b.id = "preset-" + k; b.textContent = p.name;
+    b.addEventListener("click", () => {
+      S.on = new Set(p.loads); S.vilp = p.vilp; syncControls();
+    });
+    presetsEl.appendChild(b);
+  });
+
+  const vilp = $("vilp"), cap = $("cap");
+  vilp.addEventListener("input", () => { S.vilp = parseFloat(vilp.value); syncControls(); });
+  cap.addEventListener("input", () => { S.cap = parseInt(cap.value, 10); syncControls(); });
+
+  function bindSwitch(id, get, set, on, off) {
+    const el = $(id);
+    el.addEventListener("click", () => { set(!get()); syncControls(); });
+    return () => {
+      el.setAttribute("aria-checked", get() ? "true" : "false");
+      el.querySelector(".sv").textContent = get() ? on : off;
+    };
+  }
+  const syncPlug = bindSwitch("plug", () => S.plugged, v => { S.plugged = v; }, "Kyllä", "Ei");
+  const syncMgmt = bindSwitch("mgmt", () => S.mgmt, v => { S.mgmt = v; if (v) S.paused = false; }, "Päällä", "Pois");
+
+  function bindSeg(id, get, set) {
+    const el = $(id);
+    const btns = [...el.querySelectorAll("button")];
+    btns.forEach(b => b.addEventListener("click", () => { set(Number(b.dataset.v)); syncControls(); }));
+    el.addEventListener("keydown", e => {
+      if (!["ArrowLeft", "ArrowRight"].includes(e.key)) return;
+      const i = btns.findIndex(b => Number(b.dataset.v) === get());
+      const n = btns[(i + (e.key === "ArrowRight" ? 1 : btns.length - 1)) % btns.length];
+      set(Number(n.dataset.v)); syncControls(); n.focus(); e.preventDefault();
+    });
+    return () => btns.forEach(b => {
+      const on = Number(b.dataset.v) === get();
+      b.setAttribute("aria-checked", on ? "true" : "false");
+      b.tabIndex = on ? 0 : -1;
+    });
+  }
+  const syncFuse = bindSeg("fuse", () => S.fuse, v => { S.fuse = v; drawScale(); });
+  const syncSpeed = bindSeg("speed", () => S.speed, v => { S.speed = v; });
+
+  function syncControls() {
+    for (const L of LOADS) $("chip-" + L.id).setAttribute("aria-pressed", S.on.has(L.id) ? "true" : "false");
+    vilp.value = String(S.vilp);
+    $("vilpOut").textContent = fmt(S.vilp) + " A";
+    cap.value = String(S.cap);
+    $("capOut").textContent = `${S.cap} A · ${fmt(S.cap * 0.69)} kW`;
+    syncPlug(); syncMgmt(); syncFuse(); syncSpeed();
+    $("worstLabel").textContent = S.mgmt ? "Kuormitetuin vaihe / säätöraja" : "Kuormitetuin vaihe / pääsulake";
+  }
+
+  // ---- Tila ja palkit ------------------------------------------------------
+  let lastStateText = "";
+  function drawStatus() {
+    $("kw").textContent = fmt(S.I * 0.69);
+    $("amps").textContent = `${fmt(S.I)} A × 3 vaihetta`;
+    const st = stateOf();
+    const stEl = $("state");
+    stEl.dataset.k = st.k;
+    // Päivitä luettava teksti vain kun tila vaihtuu (ei aria-live-tulvaa).
+    if (st.t !== lastStateText) { $("stateText").textContent = st.t; lastStateText = st.t; }
+    $("stateTimer").textContent = st.timer || "";
+
+    const totals = S.house.map(v => v + S.I);
+    let wi = 0; totals.forEach((v, i) => { if (v > totals[wi]) wi = i; });
+    const ref = S.mgmt ? budget() : S.fuse;
+    $("worst").textContent = `${PH[wi]} · ${fmt(totals[wi])} / ${fmt(ref)} A`;
+
+    const max = S.fuse + 5;
+    rows.forEach((r, i) => {
+      const hp = Math.min(100, (S.house[i] / max) * 100);
+      const ep = Math.max(0, Math.min(100 - hp, (S.I / max) * 100));
+      r.house.style.width = hp + "%";
+      r.ev.style.left = hp + "%";
+      r.ev.style.width = ep + "%";
+      r.ev.hidden = ep < 0.2;
+      r.house.style.borderRadius = ep < 0.2 ? "4px" : "4px 0 0 4px";
+      r.budget.style.left = (budget() / max) * 100 + "%";
+      r.fuse.style.left = (S.fuse / max) * 100 + "%";
+      r.total.textContent = fmt(totals[i]) + " A";
+      const margin = S.fuse - totals[i];
+      r.sub.textContent = margin < 0
+        ? `yli sulakkeen ${fmt(-margin)} A`
+        : `talo ${fmt(S.house[i])} · Tesla ${fmt(S.I)}`;
+      r.sub.classList.toggle("over", margin < 0);
+    });
+
+    // Tekninen näkymä
+    const pub = published();
+    const worstT = Math.max(...totals);
+    $("tWorst").textContent = fmt(worstT) + " A";
+    $("tPub").textContent = fmt(pub, 2) + " A";
+    const pmax = 30;
+    $("pubFill").style.width = Math.min(100, (pub / pmax) * 100) + "%";
+    $("pubL").style.left = (L_COND / pmax) * 100 + "%";
+    let ts;
+    if (!S.mgmt) ts = "Ohjaus pois: julkaistaan 0 A, joten laturi lataa täydellä virralla.";
+    else if (pub > L_COND + 0.06) ts = "Yli 21 A: laturi laskee latausvirtaa.";
+    else if (pub >= L_COND - 0.25) ts = "Noin 21 A: laturi pitää virran tasaisena.";
+    else ts = "Alle 21 A: laturi saa nostaa virtaa.";
+    $("tState").textContent = ts;
+  }
+
+  // ---- Kaaviot -------------------------------------------------------------
+  const charts = {
+    phase: { el: $("phaseChart"), hover: null },
+    ev: { el: $("evChart"), hover: null }
+  };
+
+  function spread(labels, minGap, lo, hi) {
+    labels.sort((a, b) => a.y - b.y);
+    for (let i = 1; i < labels.length; i++) {
+      if (labels[i].y - labels[i - 1].y < minGap) labels[i].y = labels[i - 1].y + minGap;
+    }
+    const over = labels.length ? labels[labels.length - 1].y - hi : 0;
+    if (over > 0) labels.forEach(l => { l.y -= over; });
+    labels.forEach(l => { l.y = Math.max(lo, l.y); });
+    return labels;
+  }
+
+  function pathOf(pts) {
+    let d = "";
+    pts.forEach((p, i) => { d += (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1); });
+    return d;
+  }
+
+  function drawChart(kind) {
+    const c = charts[kind], el = c.el;
+    const W = Math.max(280, el.clientWidth), H = el.clientHeight;
+    const m = { l: 34, r: kind === "ev" ? 60 : 30, t: 10, b: 22 };
+    const iw = W - m.l - m.r, ih = H - m.t - m.b;
+    const now = S.t;
+    const ymax = kind === "phase" ? S.fuse + 5 : 17;
+    const x = t => m.l + (1 - (now - t) / WINDOW) * iw;
+    const y = v => m.t + ih - (Math.min(v, ymax) / ymax) * ih;
+    const hs = S.hist.filter(s => s.t >= now - WINDOW);
+    const ink2 = css("--ink-2"), axis = css("--axis"), hair = css("--hair"), crit = css("--crit");
+    let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
+
+    // Ruudukko ja y-akseli
+    const ticks = kind === "phase" ? [] : [0, 4, 8, 12, 16];
+    if (kind === "phase") for (let v = 0; v <= ymax; v += 10) ticks.push(v);
+    ticks.forEach(v => {
+      const yy = y(v).toFixed(1);
+      svg += `<line x1="${m.l}" x2="${m.l + iw}" y1="${yy}" y2="${yy}" stroke="${v === 0 ? axis : hair}" stroke-width="1"/>`;
+      svg += `<text x="${m.l - 6}" y="${yy}" text-anchor="end" dominant-baseline="middle">${v}</text>`;
+    });
+    // x-akseli
+    [[WINDOW, "−3 min"], [120, "−2 min"], [60, "−1 min"], [0, "nyt"]].forEach(([s, lab]) => {
+      const xx = m.l + (1 - s / WINDOW) * iw;
+      const anchor = s === WINDOW ? "start" : s === 0 ? "end" : "middle";
+      svg += `<text x="${xx.toFixed(1)}" y="${H - 4}" text-anchor="${anchor}">${lab}</text>`;
+    });
+
+    const ends = [];
+    let refLabels = "";
+    if (kind === "phase") {
+      // Säätöraja ja pääsulake
+      const yb = y(budget()).toFixed(1), yf = y(S.fuse).toFixed(1);
+      svg += `<line x1="${m.l}" x2="${m.l + iw}" y1="${yb}" y2="${yb}" stroke="${ink2}" stroke-width="1.5" stroke-dasharray="5 4"/>`;
+      svg += `<line x1="${m.l}" x2="${m.l + iw}" y1="${yf}" y2="${yf}" stroke="${crit}" stroke-width="1.5"/>`;
+      refLabels += `<text class="lab" x="${m.l + 4}" y="${(+yf - 5).toFixed(1)}" style="fill:${crit}">Pääsulake ${S.fuse} A</text>`;
+      refLabels += `<text class="lab" x="${m.l + 4}" y="${(+yb + 13).toFixed(1)}">Säätöraja ${fmt(budget())} A</text>`;
+      for (let i = 0; i < 3; i++) {
+        const col = css(PHC[i]);
+        const pts = hs.map(s => [x(s.t), y(s.p[i])]);
+        if (pts.length > 1) {
+          svg += `<path d="${pathOf(pts)}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+          const lp = pts[pts.length - 1];
+          svg += `<circle cx="${lp[0].toFixed(1)}" cy="${lp[1].toFixed(1)}" r="3.5" fill="${col}" stroke="${css("--surface")}" stroke-width="2"/>`;
+          ends.push({ y: lp[1], text: PH[i], col });
+        }
+      }
+    } else {
+      const y6 = y(EV_MIN).toFixed(1);
+      svg += `<line x1="${m.l}" x2="${m.l + iw}" y1="${y6}" y2="${y6}" stroke="${axis}" stroke-width="1" stroke-dasharray="2 3"/>`;
+      refLabels += `<text class="lab" x="${m.l + 4}" y="${(+y6 - 4).toFixed(1)}">minimi 6 A</text>`;
+      const ptsI = hs.map(s => [x(s.t), y(s.ev)]);
+      const ptsT = hs.map(s => [x(s.t), y(s.tg)]);
+      const ev = css("--ev");
+      if (ptsI.length > 1) {
+        const area = pathOf(ptsI) + `L${ptsI[ptsI.length - 1][0].toFixed(1)} ${y(0)}L${ptsI[0][0].toFixed(1)} ${y(0)}Z`;
+        svg += `<path d="${area}" fill="${css("--ev-fill")}" stroke="none"/>`;
+        svg += `<path d="${pathOf(ptsT)}" fill="none" stroke="${ink2}" stroke-width="1.5" stroke-dasharray="5 4"/>`;
+        svg += `<path d="${pathOf(ptsI)}" fill="none" stroke="${ev}" stroke-width="2" stroke-linejoin="round"/>`;
+        const lp = ptsI[ptsI.length - 1], lt = ptsT[ptsT.length - 1];
+        svg += `<circle cx="${lp[0].toFixed(1)}" cy="${lp[1].toFixed(1)}" r="3.5" fill="${ev}" stroke="${css("--surface")}" stroke-width="2"/>`;
+        ends.push({ y: lp[1], text: fmt(S.I) + " A", col: ev });
+        if (Math.abs(lt[1] - lp[1]) > 1) ends.push({ y: lt[1], text: "sallittu", col: ink2 });
+      }
+    }
+    svg += refLabels;
+    spread(ends, 13, m.t + 4, m.t + ih).forEach(e => {
+      svg += `<text class="end" x="${m.l + iw + 8}" y="${e.y.toFixed(1)}" dominant-baseline="middle">${e.text}</text>`;
+    });
+
+    // Hover-ristikko
+    let tipHtml = "";
+    if (c.hover != null && hs.length) {
+      const tAt = now - (1 - (c.hover - m.l) / iw) * WINDOW;
+      let best = hs[0];
+      for (const s of hs) if (Math.abs(s.t - tAt) < Math.abs(best.t - tAt)) best = s;
+      const xx = x(best.t);
+      svg += `<line x1="${xx.toFixed(1)}" x2="${xx.toFixed(1)}" y1="${m.t}" y2="${m.t + ih}" stroke="${ink2}" stroke-width="1"/>`;
+      const ago = Math.round(now - best.t);
+      const head = `<div class="t">${ago <= 0 ? "nyt" : "−" + ago + " s"}</div>`;
+      if (kind === "phase") {
+        for (let i = 0; i < 3; i++) svg += `<circle cx="${xx.toFixed(1)}" cy="${y(best.p[i]).toFixed(1)}" r="4" fill="${css(PHC[i])}" stroke="${css("--surface")}" stroke-width="2"/>`;
+        tipHtml = head + [0, 1, 2].map(i => `<div class="r"><span><i class="sw" style="background:${css(PHC[i])}"></i>${PH[i]}</span><span>${fmt(best.p[i])} A</span></div>`).join("") +
+          `<div class="r"><span><i class="sw" style="background:${css("--ev")}"></i>Tesla</span><span>${fmt(best.ev)} A</span></div>`;
+      } else {
+        svg += `<circle cx="${xx.toFixed(1)}" cy="${y(best.ev).toFixed(1)}" r="4" fill="${css("--ev")}" stroke="${css("--surface")}" stroke-width="2"/>`;
+        tipHtml = head + `<div class="r"><span><i class="sw" style="background:${css("--ev")}"></i>Latausvirta</span><span>${fmt(best.ev)} A</span></div>` +
+          `<div class="r"><span><i class="sw sw-dash"></i>Sallittu</span><span>${fmt(best.tg)} A</span></div>`;
+      }
+      const tipLeft = xx > W / 2 ? xx - 146 : xx + 12;
+      tipHtml = `<div class="tip" style="left:${Math.max(4, tipLeft).toFixed(0)}px">${tipHtml}</div>`;
+    }
+    svg += "</svg>";
+    el.innerHTML = svg + tipHtml;
+  }
+
+  Object.values(charts).forEach(c => {
+    const setX = e => { const r = c.el.getBoundingClientRect(); c.hover = e.clientX - r.left; };
+    c.el.addEventListener("pointermove", setX);
+    c.el.addEventListener("pointerdown", setX);
+    c.el.addEventListener("pointerleave", () => { c.hover = null; });
+    c.el.addEventListener("pointercancel", () => { c.hover = null; });
+  });
+
+  // ---- Käynnistys ----------------------------------------------------------
+  // Aloitetaan tasapainotilasta ja ajetaan 3 min historiaa valmiiksi.
+  {
+    const h0 = houseAt(0);
+    S.I = Math.max(EV_MIN, Math.min(maxEV(), budget() - Math.max(...h0)));
+    for (let k = 0; k < (WINDOW + 2) * 4; k++) step(0.25);
+  }
+  drawScale();
+  syncControls();
+  drawStatus();
+  drawChart("phase");
+  drawChart("ev");
+
+  let last = performance.now(), lastDraw = 0;
+  function frame(now) {
+    let dt = Math.min(0.25, (now - last) / 1000) * S.speed;
+    last = now;
+    while (dt > 1e-6) { const d = Math.min(0.25, dt); step(d); dt -= d; }
+    if (now - lastDraw > 90) {
+      lastDraw = now;
+      drawStatus();
+      drawChart("phase");
+      drawChart("ev");
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,102 @@
+# =============================================================================
+# Tesla LoadPilot v1.4.0 – LATURISOLMU (ESP32-S3 + RS485)
+# Emuloi Neurio-mittaria Wall Connector Gen 3:n RS-485-väylässä. Säätölaki
+# (twc-core.yaml) tulee projektista sellaisenaan; tässä vain kortti, pinnit
+# ja omat raja-arvot. Laki toimii ilman HA:ta ja pilveä.
+#
+# Projekti: https://github.com/zany92/tesla-loadpilot (MIT)
+# Emuloinnin pohja: PVi1/esphome-twc-control, rekisterikartta: LucaTNT.
+# Ei Teslan tuote eikä Teslan tukema.
+#
+# VALIDOITU laturin firmwareilla 26.18 ja 26.26.1. Uudempi firmware = aja
+# testiportaat (RAW -> OMBRE-MAX -> ACTIF-MAX) ennen tuotantoa.
+#
+# KYTKENTÄ (laturin ryhmäsulake POIS ennen kannen avaamista):
+#   S3 GPIO17 (TX) -> RS485-moduulin DI
+#   S3 GPIO18 (RX) -> RS485-moduulin RO
+#   S3 GPIO16      -> moduulin DE + /RE yhdessä (MAX3485 tms.).
+#                     Automaattisuuntainen moduuli (MAX13487E): jätä irti.
+#   Moduulin A -> laturin RS485-riviliittimen PUNAINEN (A+)
+#   Moduulin B -> VALKOINEN (B-), yhteinen GND jos liitin sallii.
+#   Ei lukemia vaikka tavuja tulee -> vaihda A ja B.
+#   Laturi ei pollaa -> käynnistä ESP uudelleen VASTA kun laturi on päällä.
+#   Käytä 3,3 V moduulia (MAX3485/SP3485), ei 5 V MAX485:tä.
+#
+# ÄLÄ KOSKAAN aseta logger-tasoa VERBOSE: Modbus-vastaus myöhästyy laturin
+# ~66 ms takarajasta ja laturi lakkaa saamasta vastauksia.
+# ÄLÄ OTA-päivitä latauksen aikana (käynnistys estää latauksen hetkeksi).
+# =============================================================================
+
+substitutions:
+  node_name: loadpilot-twc
+  friendly_name: LoadPilot TWC
+  # Sama kuin mittarisolmun name: (loadpilot-meter.yaml).
+  meter_node_name: loadpilot-meter
+  # Sama kuin ref-tagi alla -> HACS-integraatio ei nosta versio-Repairia.
+  loadpilot_fw_version: "1.4.0"
+
+  # --- Sähköiset rajat (VAIHDA omiksesi) -----------------------------------
+  # Max Conductor Limit TÄSMÄLLEEN sama kuin Tesla Onessa (A).
+  # Koko kalibrointi on mitattu 21 A:lla – pidä 21.
+  twc_conductor_limit_a: "21"
+  # Pääsulake per vaihe (A). Vikatilassa julkaistaan tämä -> lataus estyy.
+  main_breaker_limit_a: "25"
+  # Suomessa "sopimusraja" = pääsulake. Budjetti = tämä × (1 − 10 %),
+  # eli 25 A -> laturi pitää pahimman vaiheen alle 22,5 A.
+  contract_limit_default_a: "25"
+  phase_count: "3"
+
+  # --- HA-varapolku (jos mittarisolmu hiljenee) – Shelly Pro 3EM suoraan ---
+  # Korvaa XXXXXXXXXXXX oman Shellysi tunnisteella:
+  # Kehittäjätyökalut -> Tilat -> hae "shellypro3em".
+  ha_current_a_entity: sensor.shellypro3em_XXXXXXXXXXXX_phase_a_current
+  ha_current_b_entity: sensor.shellypro3em_XXXXXXXXXXXX_phase_b_current
+  ha_current_c_entity: sensor.shellypro3em_XXXXXXXXXXXX_phase_c_current
+  ha_power_a_entity: sensor.shellypro3em_XXXXXXXXXXXX_phase_a_apparent_power
+  ha_power_b_entity: sensor.shellypro3em_XXXXXXXXXXXX_phase_b_apparent_power
+  ha_power_c_entity: sensor.shellypro3em_XXXXXXXXXXXX_phase_c_apparent_power
+  # Tesla Wall Connector -integraation kontaktori (voi olla oletuksena
+  # pois käytöstä – ota käyttöön entiteettiasetuksista).
+  ha_contactor_entity: binary_sensor.tesla_wall_connector_contactor_closed
+
+  # --- Pinnit (ESP32-S3) ----------------------------------------------------
+  rs485_tx_pin: GPIO17
+  rs485_rx_pin: GPIO18
+  rs485_de_re_pin: GPIO16
+
+packages:
+  loadpilot:
+    url: https://github.com/zany92/tesla-loadpilot
+    files:
+      - esphome/packages/twc-core.yaml
+    ref: v1.4.0        # AINA tagi, ei main
+    refresh: 1d
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+
+wifi:
+  ssid: !secret loadpilot_wifi_ssid
+  password: !secret loadpilot_wifi_password
+  # Laki pyörii myös ilman verkkoa: älä käynnistä uudelleen WiFin kadotessa.
+  reboot_timeout: 0s
+  ap:
+    ssid: ${node_name}
+    password: !secret loadpilot_ap_password
+
+captive_portal:
+
+uart:
+  # twc-core.yaml odottaa väylää id:llä rs485 (115200 8N1, Neurio).
+  # flow_control_pin = ESP32:n laitteistotason RS485 half-duplex (DE/RE
+  # ajoitus raudassa) – toimii myös automaattisuuntaisella moduulilla.
+  - id: rs485
+    tx_pin: ${rs485_tx_pin}
+    rx_pin: ${rs485_rx_pin}
+    flow_control_pin: ${rs485_de_re_pin}
+    baud_rate: 115200
+    data_bits: 8
+    parity: NONE
+    stop_bits: 1

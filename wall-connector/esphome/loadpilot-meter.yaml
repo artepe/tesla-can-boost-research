@@ -1,0 +1,276 @@
+# =============================================================================
+# Tesla LoadPilot v1.4.0 – MITTARISOLMU (ESP32-C3) / Shelly Pro 3EM -provider
+# Lukee pääkeskuksen Shelly Pro 3EM:n vaihevirrat ja -tehot paikallisesti
+# HTTP:llä (RPC EM.GetStatus, 1 Hz) ja lähettää ne laturisolmulle
+# salattuna UDP:nä projektin JÄÄDYTETYN sopimuksen mukaan:
+#   lky_ia/ib/ic = vaihevirta (A), lky_pa/pb/pc = näennäisteho (VA)
+#   raaka arvo (ei suodatusta), 1 s täysi lähetys + heti muutoksesta,
+#   vikatilassa NAN (ei koskaan jäädytettyä arvoa).
+# Ei riipu HA:sta, MQTT:stä eikä pilvestä – vain WiFi + Shelly.
+#
+# Shelly: kolmivaiheprofiili (oletus, komponentti em:0), paikallinen
+# tunnistautuminen POIS (HTTP-haku ei tue digest-authia). Varaa Shellylle
+# kiinteä IP DHCP:stä.
+# =============================================================================
+
+substitutions:
+  node_name: loadpilot-meter
+  friendly_name: LoadPilot Meter
+  loadpilot_fw_version: "1.4.0-shelly"
+  # VAIHDA: Shelly Pro 3EM:n IP-osoite.
+  shelly_host: "192.168.1.50"
+  # Hiljaisuusraja ennen kuin 6 suuretta mitätöidään (NAN) -> laturisolmu
+  # siirtyy HA-varapolulle / vikatilaan. 8 s = 8 peräkkäistä epäonnistunutta hakua.
+  shelly_timeout_ms: "8000"
+
+esphome:
+  name: ${node_name}
+  friendly_name: ${friendly_name}
+  project:
+    name: loadpilot.meter-shelly-pro3em
+    version: ${loadpilot_fw_version}
+
+esp32:
+  board: esp32-c3-devkitm-1
+  framework:
+    type: esp-idf
+
+logger:
+
+api:
+  encryption:
+    key: !secret loadpilot_api_key
+
+ota:
+  - platform: esphome
+    password: !secret loadpilot_ota_password
+
+wifi:
+  ssid: !secret loadpilot_wifi_ssid
+  password: !secret loadpilot_wifi_password
+  # C3 SuperMini ja epävakaa WiFi? Lisää: output_power: 8.5dB
+  ap:
+    ssid: ${node_name}
+    password: !secret loadpilot_ap_password
+
+captive_portal:
+
+http_request:
+  # Alle hakuvälin (1 s), ettei roikkuva haku kasaa viivettä.
+  timeout: 800ms
+
+# =============================================================================
+# UDP -> laturisolmu (portti 18511, broadcast). Jos verkko estää broadcastin,
+# avaa addresses ja anna laturisolmun IP (VAIN yksi kohde).
+# =============================================================================
+udp:
+  id: udp_meter
+#  addresses: ["192.168.1.60"]
+
+packet_transport:
+  - platform: udp
+    udp_id: udp_meter
+    update_interval: 1s
+    # SAMA avain laturisolmussa.
+    encryption: !secret loadpilot_udp_key
+    rolling_code_enable: true
+    sensors:
+      - id: sh_current_a
+        broadcast_id: lky_ia
+      - id: sh_current_b
+        broadcast_id: lky_ib
+      - id: sh_current_c
+        broadcast_id: lky_ic
+      - id: sh_power_a
+        broadcast_id: lky_pa
+      - id: sh_power_b
+        broadcast_id: lky_pb
+      - id: sh_power_c
+        broadcast_id: lky_pc
+
+globals:
+  - id: sh_last_ok_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+  - id: sh_dead_flagged
+    type: bool
+    restore_value: no
+    initial_value: "false"
+
+interval:
+  # --- Haku 1 Hz -------------------------------------------------------------
+  - interval: 1s
+    then:
+      - http_request.get:
+          url: http://${shelly_host}/rpc/EM.GetStatus?id=0
+          capture_response: true
+          max_response_buffer_size: 2048
+          on_response:
+            then:
+              - lambda: |-
+                  if (response->status_code != 200) {
+                    ESP_LOGW("shelly", "HTTP %d", response->status_code);
+                    return;
+                  }
+                  bool ok = json::parse_json(body, [](JsonObject root) -> bool {
+                    if (root["a_current"].isNull() || root["b_current"].isNull() ||
+                        root["c_current"].isNull()) {
+                      return false;
+                    }
+                    const float ia = root["a_current"].as<float>();
+                    const float ib = root["b_current"].as<float>();
+                    const float ic = root["c_current"].as<float>();
+                    // Näennäisteho (VA); jos kenttä puuttuu: I × U.
+                    auto va = [&](const char *aprt, const char *volt, float i) -> float {
+                      if (!root[aprt].isNull()) return fabsf(root[aprt].as<float>());
+                      float u = root[volt].isNull() ? 230.0f : root[volt].as<float>();
+                      if (u < 180.0f) u = 230.0f;
+                      return i * u;
+                    };
+                    id(sh_current_a).publish_state(ia);
+                    id(sh_current_b).publish_state(ib);
+                    id(sh_current_c).publish_state(ic);
+                    id(sh_power_a).publish_state(va("a_aprt_power", "a_voltage", ia));
+                    id(sh_power_b).publish_state(va("b_aprt_power", "b_voltage", ib));
+                    id(sh_power_c).publish_state(va("c_aprt_power", "c_voltage", ic));
+                    return true;
+                  });
+                  if (ok) {
+                    id(sh_last_ok_ms) = millis();
+                    if (id(sh_dead_flagged)) {
+                      id(sh_dead_flagged) = false;
+                      ESP_LOGI("shelly", "Shelly takaisin – oikeat arvot julkaistu");
+                    }
+                  } else {
+                    ESP_LOGW("shelly", "Vastaus ilman vaihevirtoja (profiili em:0?)");
+                  }
+          on_error:
+            then:
+              - logger.log:
+                  level: WARN
+                  tag: shelly
+                  format: "Shelly-haku epäonnistui"
+
+  # --- Vahtikoira: ei koskaan jäädytettyä arvoa ------------------------------
+  - interval: 1s
+    then:
+      - lambda: |-
+          if (id(sh_last_ok_ms) == 0 || id(sh_dead_flagged)) return;
+          if ((millis() - id(sh_last_ok_ms)) > ${shelly_timeout_ms}) {
+            id(sh_dead_flagged) = true;
+            ESP_LOGW("shelly", "Shelly hiljaa %s ms -> 6 suuretta NAN", "${shelly_timeout_ms}");
+            id(sh_current_a).publish_state(NAN);
+            id(sh_current_b).publish_state(NAN);
+            id(sh_current_c).publish_state(NAN);
+            id(sh_power_a).publish_state(NAN);
+            id(sh_power_b).publish_state(NAN);
+            id(sh_power_c).publish_state(NAN);
+          }
+
+sensor:
+  # Lähetettävät raakasuureet (sisäiset, ei recorder-kuormaa).
+  - platform: template
+    id: sh_current_a
+    internal: true
+    unit_of_measurement: A
+    accuracy_decimals: 3
+    update_interval: never
+  - platform: template
+    id: sh_current_b
+    internal: true
+    unit_of_measurement: A
+    accuracy_decimals: 3
+    update_interval: never
+  - platform: template
+    id: sh_current_c
+    internal: true
+    unit_of_measurement: A
+    accuracy_decimals: 3
+    update_interval: never
+  - platform: template
+    id: sh_power_a
+    internal: true
+    unit_of_measurement: VA
+    accuracy_decimals: 0
+    update_interval: never
+  - platform: template
+    id: sh_power_b
+    internal: true
+    unit_of_measurement: VA
+    accuracy_decimals: 0
+    update_interval: never
+  - platform: template
+    id: sh_power_c
+    internal: true
+    unit_of_measurement: VA
+    accuracy_decimals: 0
+    update_interval: never
+
+  # Sopimuksen mukaiset HA-entiteetit (harvennetut kopiot).
+  - platform: copy
+    source_id: sh_current_a
+    name: "Current L1"
+    unit_of_measurement: A
+    device_class: current
+    state_class: measurement
+    accuracy_decimals: 2
+    filters: [ throttle: 2s ]
+  - platform: copy
+    source_id: sh_current_b
+    name: "Current L2"
+    unit_of_measurement: A
+    device_class: current
+    state_class: measurement
+    accuracy_decimals: 2
+    filters: [ throttle: 2s ]
+  - platform: copy
+    source_id: sh_current_c
+    name: "Current L3"
+    unit_of_measurement: A
+    device_class: current
+    state_class: measurement
+    accuracy_decimals: 2
+    filters: [ throttle: 2s ]
+  - platform: copy
+    source_id: sh_power_a
+    name: "Power L1"
+    unit_of_measurement: VA
+    device_class: apparent_power
+    state_class: measurement
+    filters: [ throttle: 2s ]
+  - platform: copy
+    source_id: sh_power_b
+    name: "Power L2"
+    unit_of_measurement: VA
+    device_class: apparent_power
+    state_class: measurement
+    filters: [ throttle: 2s ]
+  - platform: copy
+    source_id: sh_power_c
+    name: "Power L3"
+    unit_of_measurement: VA
+    device_class: apparent_power
+    state_class: measurement
+    filters: [ throttle: 2s ]
+
+binary_sensor:
+  # Erottaa "solmu elossa mutta Shelly ei vastaa" -tilanteen.
+  - platform: template
+    name: "Shelly Alive"
+    device_class: connectivity
+    lambda: |-
+      if (id(sh_last_ok_ms) == 0) return {};
+      return (millis() - id(sh_last_ok_ms)) < ${shelly_timeout_ms};
+
+text_sensor:
+  - platform: template
+    name: "FW Version"
+    icon: "mdi:tag-outline"
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: 'return {"${loadpilot_fw_version}"};'
+
+button:
+  - platform: restart
+    name: "Restart"
